@@ -191,8 +191,21 @@ def _compare_state(args, *, nvidia_enabled: bool) -> dict[str, list[str]]:
     if args.var_db_new:
         dpkg_meta_b = pkg_compare.load_dpkg_metadata_from_tar(args.var_db_new)
 
+    if dpkg_meta_a is not None:
+        old_replaces_index, old_provides_index = pkg_compare.build_transition_index(
+            list_a,
+            dpkg_meta_a,
+        )
+        filtered_new = []
+        for new_pkg in only_in_b:
+            if new_pkg in old_replaces_index or new_pkg in old_provides_index:
+                continue
+            filtered_new.append(new_pkg)
+    else:
+        filtered_new = list(only_in_b)
+
     if dpkg_meta_b is not None:
-        replaces_index, provides_index = pkg_compare.build_transition_index_for_b(
+        replaces_index, provides_index = pkg_compare.build_transition_index(
             list_b,
             dpkg_meta_b,
         )
@@ -225,7 +238,7 @@ def _compare_state(args, *, nvidia_enabled: bool) -> dict[str, list[str]]:
             nvidia_patterns,
         )
         nv_new = pkg_compare.classify_nvidia_packages(
-            only_in_b,
+            filtered_new,
             nvidia_patterns,
         )
         nv_removed = pkg_compare.classify_nvidia_packages(
@@ -244,7 +257,7 @@ def _compare_state(args, *, nvidia_enabled: bool) -> dict[str, list[str]]:
             exclude_patterns,
         ),
         "new": pkg_compare.remove_excluded_packages(
-            only_in_b,
+            filtered_new,
             exclude_list,
             exclude_patterns,
         ),

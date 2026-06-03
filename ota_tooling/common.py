@@ -7,6 +7,7 @@ package comparison and package download entry points.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from typing import Iterable
 
@@ -21,6 +22,36 @@ def ensure_file_exists(file_path: str, label: str) -> None:
     if not os.path.exists(file_path):
         print(f"Error: {label} '{file_path}' not found.")
         sys.exit(1)
+
+
+
+
+_PACKAGE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]*$")
+
+
+def is_valid_package_name(package_name: str) -> bool:
+    """Return whether a package name looks like a valid Debian package name.
+
+    Args:
+        package_name: Package name to validate.
+
+    Returns:
+        ``True`` when the package name matches the allowed character set.
+    """
+    return bool(_PACKAGE_NAME_RE.fullmatch(package_name))
+
+
+def ensure_valid_package_names(packages: Iterable[str], label: str) -> None:
+    """Exit if any package name in a collection is invalid.
+
+    Args:
+        packages: Package names to validate.
+        label: Human-readable label used in the error message.
+    """
+    for package in packages:
+        if not is_valid_package_name(package):
+            print(f"Error: {label} contains an invalid package name: '{package}'.")
+            sys.exit(1)
 
 
 def ensure_directory_exists(directory: str, label: str) -> None:

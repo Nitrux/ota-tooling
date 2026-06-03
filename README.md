@@ -30,8 +30,6 @@ Nitrux Update Tool System OTA Build is a utility that creates OTA archives (Squa
     where compare/download outputs are written.
 --var-db-old / --var-db-new:
     use tarballs for better package transition detection.
---nv-new / --nv-update / --nv-remove:
-    write NVIDIA-related subsets.
 ```
 
 # Licensing

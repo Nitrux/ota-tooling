@@ -13,7 +13,7 @@ from subprocess import CalledProcessError
 
 from tqdm import tqdm
 
-from .common import ensure_file_exists, read_nonempty_lines
+from .common import ensure_file_exists, ensure_valid_package_names, read_nonempty_lines
 
 
 def download_packages(package_list_file, download_dir):
@@ -38,6 +38,7 @@ def download_packages(package_list_file, download_dir):
         sys.exit(1)
 
     packages = read_nonempty_lines(package_list_file)
+    ensure_valid_package_names(packages, "Package list file")
     terminal_width = shutil.get_terminal_size().columns
 
     with tqdm(

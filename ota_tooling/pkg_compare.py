@@ -212,17 +212,18 @@ def load_dpkg_metadata_from_tar(tar_path):
                     break
 
             if status_member is None:
+                expected = ", ".join(candidates)
                 print(
-                    "Error: Could not find /var/lib/dpkg/status in "
-                    f"'{tar_path}'."
+                    "Error: Could not find a readable dpkg status file in "
+                    f"'{tar_path}'. Expected one of: {expected}."
                 )
                 sys.exit(1)
 
             f = tf.extractfile(status_member)
             if f is None:
                 print(
-                    "Error: Could not read /var/lib/dpkg/status from "
-                    f"'{tar_path}'."
+                    "Error: Found dpkg status entry "
+                    f"'{status_member.name}' in '{tar_path}', but it could not be read."
                 )
                 sys.exit(1)
 
@@ -264,22 +265,22 @@ def get_control_data_from_host(package_name):
     }
 
 
-def build_transition_index_for_b(list_b, dpkg_meta_b):
-    """Build reverse indexes of Replaces/Provides transitions for list B.
+def build_transition_index(list_packages, dpkg_meta=None):
+    """Build reverse indexes from snapshot metadata for transition filtering.
 
     Args:
-        list_b: Package mapping for the target list.
-        dpkg_meta_b: Optional metadata mapping for list B packages.
+        list_packages: Package mapping from the old or new snapshot.
+        dpkg_meta: Optional metadata mapping for packages in that snapshot.
 
     Returns:
-        A tuple of reverse indexes for Replaces and Provides transitions.
+        A tuple of reverse indexes for ``Replaces`` and ``Provides`` matches.
     """
     replaces_index = {}
     provides_index = {}
 
-    for pkg in list_b.keys():
-        if dpkg_meta_b is not None:
-            md = dpkg_meta_b.get(pkg, {"Replaces": set(), "Provides": set()})
+    for pkg in list_packages.keys():
+        if dpkg_meta is not None:
+            md = dpkg_meta.get(pkg, {"Replaces": set(), "Provides": set()})
         else:
             md = get_control_data_from_host(pkg)
 
