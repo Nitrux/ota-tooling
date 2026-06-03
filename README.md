@@ -21,7 +21,7 @@ Nitrux Update Tool System OTA Build is a utility that creates OTA archives (Squa
 
 **Create**: `ota-build create`
 - Create an OTA-style SquashFS archive.
-  -  `create` writes the SquashFS archive plus `.contents` and `.md5sum` files next to it.
+  -  `create` writes the SquashFS archive plus `.contents` and `.sha256sum` files next to it.
 
 ### Options:
 
