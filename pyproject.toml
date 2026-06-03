@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ota-tooling"
+version = "1.0.0"
+description = "Utility to create OTA archives for NUTS."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "tqdm>=4.66",
+]
+license = { text = "BSD-3-Clause" }
+
+[project.scripts]
+ota-build = "ota_tooling.controller:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["ota_tooling*"]
+

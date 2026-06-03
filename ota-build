@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright <2026> <Uri Herrera <uri_herrera@nxos.org>>
+
+from ota_tooling.controller import main
+
+
+if __name__ == "__main__":
+    main()
