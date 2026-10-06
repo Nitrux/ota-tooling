@@ -9,6 +9,50 @@ Nitrux Update Tool System OTA Build is a utility that creates OTA archives (Squa
 > [!WARNING]
 > We intended the Nitrux Update Tool System to work exclusively in Nitrux OS; using the archives this utility creates in other distributions will break them or render them unusable. Please do not open issues regarding this use case; they will be closed.
 
+### Runtime Requirements
+
+```
+apt
+squashfs
+```
+
+# Installation
+
+To install we recommend using `pipx`.
+
+## Single-user
+
+```
+pipx install git+https://github.com/Nitrux/ota-tooling.git
+```
+
+> [!WARNING]
+> pipx will install `ota-tooling` to `$HOME/.local/bin`, run `pipx ensurepath` to add this directory to `$PATH`.
+
+
+## System-wide
+
+```
+sudo pipx install --global git+https://github.com/Nitrux/ota-tooling.git
+```
+
+# Uninstallation
+
+To uninstall, do the following.
+
+## Single-user
+
+```
+pipx uninstall ota-tooling
+```
+
+
+## System-wide
+
+```
+sudo pipx uninstall --global ota-tooling
+```
+
 # Usage
 
 ### Commands:
