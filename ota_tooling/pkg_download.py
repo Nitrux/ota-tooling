@@ -6,80 +6,81 @@ The command reads a package-name list and downloads each package with APT, reusi
 from __future__ import annotations
 
 import hashlib
+import shlex
 import shutil
 from pathlib import Path
 import subprocess
 import sys
-from subprocess import CalledProcessError
 
 from tqdm import tqdm
 
 from .common import ensure_file_exists, ensure_valid_package_names, read_nonempty_lines
 
 
-def _read_apt_package_metadata(packages):
-    """Return APT filenames, sizes, and SHA-256 checksums for packages."""
-    try:
-        result = subprocess.run(
-            ["apt-cache", "show", "--no-all-versions", *packages],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return {}
+def _ensure_apt_available():
+    """Exit with a clear error when a required APT command is unavailable."""
+    required_commands = ("apt",)
+    missing_commands = [
+        command for command in required_commands if shutil.which(command) is None
+    ]
+    if missing_commands:
+        missing = ", ".join(missing_commands)
+        print(f"Error: required command(s) not found: {missing}.", file=sys.stderr)
+        sys.exit(1)
 
-    metadata = {}
-    record = {}
 
-    for line in (*result.stdout.splitlines(), ""):
-        if not line:
-            package = record.get("Package")
-            filename = record.get("Filename")
-            checksum = record.get("SHA256")
-            size = record.get("Size")
-            if package and filename and checksum:
-                metadata[package] = (
-                    Path(filename).name,
-                    checksum.lower(),
-                    int(size) if size and size.isdigit() else None,
-                )
-            record = {}
+def _read_apt_download_plan(package):
+    """Return the package files APT would download without fetching them."""
+    result = subprocess.run(
+        ["apt", "--print-uris", "download", package],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        error = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(error or "APT could not resolve the package.")
+
+    plan = []
+    for line in result.stdout.splitlines():
+        fields = shlex.split(line)
+        if len(fields) < 4 or not fields[1].endswith(".deb"):
             continue
-
-        if line[0].isspace() or ":" not in line:
+        checksum_name, separator, expected_checksum = fields[3].partition(":")
+        if not separator or checksum_name.lower() not in ("md5sum", "sha1", "sha256", "sha512"):
             continue
+        try:
+            size = int(fields[2])
+        except ValueError:
+            continue
+        plan.append((Path(fields[1]).name, size, checksum_name.lower(), expected_checksum.lower()))
 
-        key, value = line.split(":", 1)
-        record[key] = value.strip()
+    if not plan:
+        raise RuntimeError("APT did not report a package file.")
 
-    return metadata
+    return plan
 
 
-def _matches_apt_package(package, download_dir, metadata):
-    """Check whether a downloaded package matches the expected checksum."""
-    package_metadata = metadata.get(package)
-    if not package_metadata:
-        return False
+def _matches_existing_package(download_dir, plan):
+    """Check whether all files in an APT download plan are already valid."""
+    for filename, expected_size, checksum_name, expected_checksum in plan:
+        package_path = Path(download_dir) / filename
+        try:
+            if not package_path.is_file() or package_path.stat().st_size != expected_size:
+                return False
 
-    filename, expected_checksum, expected_size = package_metadata
-    package_path = Path(download_dir) / filename
-
-    try:
-        if not package_path.is_file():
+            checksum = hashlib.new(checksum_name)
+            with package_path.open("rb") as package_file:
+                for chunk in iter(lambda: package_file.read(1024 * 1024), b""):
+                    checksum.update(chunk)
+        except OSError:
             return False
-        if expected_size is not None and package_path.stat().st_size != expected_size:
+
+        if checksum.hexdigest() != expected_checksum:
             return False
 
-        checksum = hashlib.sha256()
-        with package_path.open("rb") as package_file:
-            for chunk in iter(lambda: package_file.read(1024 * 1024), b""):
-                checksum.update(chunk)
-    except OSError:
-        return False
-
-    return checksum.hexdigest() == expected_checksum
+    return True
 
 
 def download_packages(package_list_file, download_dir):
@@ -89,23 +90,13 @@ def download_packages(package_list_file, download_dir):
         package_list_file: Path to a file containing one package name per line.
         download_dir: Directory where downloaded packages should be stored.
     """
+    _ensure_apt_available()
     ensure_file_exists(package_list_file, "Package list file")
     Path(download_dir).mkdir(parents=True, exist_ok=True)
 
-    try:
-        subprocess.run(
-            ["sudo", "apt", "update"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True,
-        )
-    except CalledProcessError:
-        print("Failed to update package lists.")
-        sys.exit(1)
-
     packages = read_nonempty_lines(package_list_file)
     ensure_valid_package_names(packages, "Package list file")
-    apt_metadata = _read_apt_package_metadata(packages)
+    existing_packages = {path.name for path in Path(download_dir).glob("*.deb")}
     skipped_packages = 0
     terminal_width = shutil.get_terminal_size().columns
 
@@ -117,21 +108,32 @@ def download_packages(package_list_file, download_dir):
         bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
     ) as pbar:
         for package in packages:
-            if _matches_apt_package(package, download_dir, apt_metadata):
-                skipped_packages += 1
-                pbar.update(1)
-                continue
+            if existing_packages:
+                try:
+                    plan = _read_apt_download_plan(package)
+                except RuntimeError as error:
+                    print(error, file=sys.stderr)
+                    print(f"Failed to plan download for package {package!r}. Exiting.")
+                    sys.exit(1)
 
-            try:
-                subprocess.run(
-                    ["sudo", "apt", "download", package],
-                    cwd=download_dir,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=True,
-                )
-            except CalledProcessError:
-                print(f"Package '{package}' not found. Exiting.")
+                if _matches_existing_package(download_dir, plan):
+                    skipped_packages += 1
+                    pbar.update(1)
+                    continue
+
+            download_result = subprocess.run(
+                ["apt", "download", package],
+                cwd=download_dir,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            if download_result.returncode != 0:
+                error = download_result.stderr.strip()
+                if error:
+                    print(error, file=sys.stderr)
+                print(f"Failed to download package '{package}'. Exiting.")
                 sys.exit(1)
 
             pbar.update(1)
