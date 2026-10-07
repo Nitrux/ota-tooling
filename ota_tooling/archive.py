@@ -170,7 +170,8 @@ def create_archive(items, dest_file=None):
         file.write(f"{sha256_line}\n")
 
     size_output = subprocess.run(["du", "-sh", dest_file], check=True, capture_output=True, text=True).stdout.strip()
-    size = size_output.split(maxsplit=1)[0] if size_output else size_output
+    human_size = size_output.split(maxsplit=1)[0] if size_output else size_output
+    size = f"{Path(dest_file).stat().st_size} ({human_size})"
 
     render_summary(
         "Archive Summary",
