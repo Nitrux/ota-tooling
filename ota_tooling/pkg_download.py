@@ -29,10 +29,10 @@ def _ensure_apt_available():
         sys.exit(1)
 
 
-def _read_apt_download_plan(package):
-    """Return the package files APT would download without fetching them."""
+def _read_apt_download_plan(packages):
+    """Return the files APT would download for a package list."""
     result = subprocess.run(
-        ["apt", "--print-uris", "download", package],
+        ["apt", "--print-uris", "download", *packages],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -40,9 +40,9 @@ def _read_apt_download_plan(package):
     )
     if result.returncode != 0:
         error = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(error or "APT could not resolve the package.")
+        raise RuntimeError(error or "APT could not resolve the packages.")
 
-    plan = []
+    plans = {}
     for line in result.stdout.splitlines():
         fields = shlex.split(line)
         if len(fields) < 4 or not fields[1].endswith(".deb"):
@@ -54,12 +54,17 @@ def _read_apt_download_plan(package):
             size = int(fields[2])
         except ValueError:
             continue
-        plan.append((Path(fields[1]).name, size, checksum_name.lower(), expected_checksum.lower()))
 
-    if not plan:
-        raise RuntimeError("APT did not report a package file.")
+        filename = Path(fields[1]).name
+        package = filename.split("_", 1)[0]
+        plans.setdefault(package, []).append(
+            (filename, size, checksum_name.lower(), expected_checksum.lower())
+        )
 
-    return plan
+    if not plans:
+        raise RuntimeError("APT did not report any package files.")
+
+    return plans
 
 
 def _matches_existing_package(download_dir, plan):
@@ -97,7 +102,30 @@ def download_packages(package_list_file, download_dir):
     packages = read_nonempty_lines(package_list_file)
     ensure_valid_package_names(packages, "Package list file")
     existing_packages = {path.name for path in Path(download_dir).glob("*.deb")}
+    packages_to_download = packages
     skipped_packages = 0
+
+    if existing_packages and packages:
+        packages_to_download = []
+        try:
+            plans = _read_apt_download_plan(packages)
+        except RuntimeError as error:
+            print(error, file=sys.stderr)
+            print("Failed to plan package downloads. Exiting.")
+            sys.exit(1)
+
+        for package in packages:
+            plan = plans.get(package)
+            if not plan:
+                print(f"APT did not report a package file for {package!r}.", file=sys.stderr)
+                print(f"Failed to plan download for package {package!r}. Exiting.")
+                sys.exit(1)
+
+            if _matches_existing_package(download_dir, plan):
+                skipped_packages += 1
+            else:
+                packages_to_download.append(package)
+
     terminal_width = shutil.get_terminal_size().columns
 
     with tqdm(
@@ -107,22 +135,11 @@ def download_packages(package_list_file, download_dir):
         ncols=terminal_width,
         bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
     ) as pbar:
-        for package in packages:
-            if existing_packages:
-                try:
-                    plan = _read_apt_download_plan(package)
-                except RuntimeError as error:
-                    print(error, file=sys.stderr)
-                    print(f"Failed to plan download for package {package!r}. Exiting.")
-                    sys.exit(1)
+        pbar.update(skipped_packages)
 
-                if _matches_existing_package(download_dir, plan):
-                    skipped_packages += 1
-                    pbar.update(1)
-                    continue
-
+        if packages_to_download:
             download_result = subprocess.run(
-                ["apt", "download", package],
+                ["apt", "download", *packages_to_download],
                 cwd=download_dir,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -133,11 +150,10 @@ def download_packages(package_list_file, download_dir):
                 error = download_result.stderr.strip()
                 if error:
                     print(error, file=sys.stderr)
-                print(f"Failed to download package '{package}'. Exiting.")
+                print("Failed to download packages. Exiting.")
                 sys.exit(1)
 
-            pbar.update(1)
-
+            pbar.update(len(packages_to_download))
     print("\nPackages downloaded successfully.")
     if skipped_packages:
         print(f"Skipped {skipped_packages} existing package(s) with matching checksums.")

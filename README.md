@@ -14,6 +14,7 @@ Nitrux Update Tool System OTA Build is a utility that creates OTA archives (Squa
 ```
 apt
 squashfs
+zstd
 ```
 
 # Installation
