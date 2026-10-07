@@ -227,7 +227,7 @@ def _compare_state(args, *, nvidia_enabled: bool) -> dict[str, list[str]]:
     exclude_patterns = [
         r"dpkg",
         r"libapt-pkg",
-        r"systemd",
+        r"^systemd$",
         *pkg_compare.NVIDIA_PATTERNS,
     ]
     nvidia_patterns = pkg_compare.NVIDIA_PATTERNS
