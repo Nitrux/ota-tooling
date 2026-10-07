@@ -8,6 +8,8 @@ from __future__ import annotations
 import hashlib
 import shlex
 import shutil
+import tempfile
+import time
 from pathlib import Path
 import subprocess
 import sys
@@ -88,6 +90,113 @@ def _matches_existing_package(download_dir, plan):
     return True
 
 
+def _completed_downloads(download_dir, packages, plans, initial_files):
+    """Return packages whose planned files have finished downloading."""
+    completed = set()
+
+    if not plans:
+        package_names = {
+            package.split(":", 1)[0]: package for package in packages
+        }
+        for package_path in Path(download_dir).glob("*.deb"):
+            package_name = package_path.name[:-4].rsplit("_", 2)[0]
+            package = package_names.get(package_name)
+            if package is None:
+                continue
+            try:
+                stat_result = package_path.stat()
+            except OSError:
+                continue
+            initial_state = initial_files.get(package_path)
+            current_state = (stat_result.st_size, stat_result.st_mtime_ns)
+            if initial_state is not None and current_state == initial_state:
+                continue
+            if stat_result.st_size > 0:
+                completed.add(package)
+        return completed
+
+    for package in packages:
+        plan = plans.get(package)
+        if not plan:
+            continue
+
+        files_complete = True
+        for filename, expected_size, _checksum_name, _expected_checksum in plan:
+            package_path = Path(download_dir) / filename
+            try:
+                stat_result = package_path.stat()
+            except OSError:
+                files_complete = False
+                break
+
+            if stat_result.st_size != expected_size:
+                files_complete = False
+                break
+
+            initial_state = initial_files.get(package_path)
+            current_state = (stat_result.st_size, stat_result.st_mtime_ns)
+            if initial_state is not None and current_state == initial_state:
+                files_complete = False
+                break
+
+        if files_complete:
+            completed.add(package)
+
+    return completed
+
+
+def _download_with_progress(download_dir, packages, plans, pbar):
+    """Download packages with APT while tracking completed package files."""
+    initial_files = {}
+    for package_path in Path(download_dir).glob("*.deb"):
+        try:
+            stat_result = package_path.stat()
+        except OSError:
+            continue
+        initial_files[package_path] = (
+            stat_result.st_size,
+            stat_result.st_mtime_ns,
+        )
+
+    completed = set()
+    with tempfile.TemporaryFile(mode="w+t") as error_file:
+        process = subprocess.Popen(
+            ["apt", "download", *packages],
+            cwd=download_dir,
+            stdout=subprocess.DEVNULL,
+            stderr=error_file,
+            text=True,
+        )
+
+        while process.poll() is None:
+            newly_completed = _completed_downloads(
+                download_dir,
+                packages,
+                plans,
+                initial_files,
+            ) - completed
+            if newly_completed:
+                completed.update(newly_completed)
+                pbar.update(len(newly_completed))
+            time.sleep(0.1)
+
+        returncode = process.wait()
+        newly_completed = _completed_downloads(
+            download_dir,
+            packages,
+            plans,
+            initial_files,
+        ) - completed
+        if newly_completed:
+            completed.update(newly_completed)
+            pbar.update(len(newly_completed))
+
+        error_file.seek(0)
+        error = error_file.read().strip()
+
+    return returncode, error, completed
+
+
 def download_packages(package_list_file, download_dir):
     """Download packages listed in a text file using `apt download`.
 
@@ -104,6 +213,7 @@ def download_packages(package_list_file, download_dir):
     existing_packages = {path.name for path in Path(download_dir).glob("*.deb")}
     packages_to_download = packages
     skipped_packages = 0
+    plans = {}
 
     if existing_packages and packages:
         packages_to_download = []
@@ -138,23 +248,23 @@ def download_packages(package_list_file, download_dir):
         pbar.update(skipped_packages)
 
         if packages_to_download:
-            download_result = subprocess.run(
-                ["apt", "download", *packages_to_download],
-                cwd=download_dir,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
+            returncode, error, completed = _download_with_progress(
+                download_dir,
+                packages_to_download,
+                plans,
+                pbar,
             )
-            if download_result.returncode != 0:
-                error = download_result.stderr.strip()
+            if returncode != 0:
                 if error:
                     print(error, file=sys.stderr)
                 print("Failed to download packages. Exiting.")
                 sys.exit(1)
 
-            pbar.update(len(packages_to_download))
+            if len(completed) < len(packages_to_download):
+                pbar.update(len(packages_to_download) - len(completed))
     print("\nPackages downloaded successfully.")
+    if packages_to_download:
+        print(f"Downloaded {len(packages_to_download)} new package(s).")
     if skipped_packages:
         print(f"Skipped {skipped_packages} existing package(s) with matching checksums.")
 
