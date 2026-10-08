@@ -210,6 +210,7 @@ def download_packages(package_list_file, download_dir):
 
     packages = read_nonempty_lines(package_list_file)
     ensure_valid_package_names(packages, "Package list file")
+    packages = [package for package in packages if "calamares" not in package]
     existing_packages = {path.name for path in Path(download_dir).glob("*.deb")}
     packages_to_download = packages
     skipped_packages = 0

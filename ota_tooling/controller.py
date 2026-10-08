@@ -220,11 +220,10 @@ def _compare_state(args, *, nvidia_enabled: bool) -> dict[str, list[str]]:
     exclude_list = [
         "apt",
         "apt-transport-https",
-        "calamares",
-        "calamares-qml-settings-nitrux",
         "casper",
     ]
     exclude_patterns = [
+        r"calamares",
         r"dpkg",
         r"libapt-pkg",
         r"^systemd$",
